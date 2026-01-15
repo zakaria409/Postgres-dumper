@@ -1,31 +1,12 @@
-export interface ParseResult {
-  headers: string[];
-  rows: any[];
-  errors: ParseError[];
-  metadata: {
-    rowCount: number;
-    columnCount: number;
-    hasSeparatorRow: boolean;
-    formatDetected: 'pipe' | 'grid' | 'minimal';
-  };
-}
+import { ParseResult, ParseError } from '../../types';
 
-export interface ParseError {
-  type: 'malformed_row' | 'column_mismatch' | 'empty_table' | 'invalid_separator';
-  message: string;
-  line?: number;
-  column?: number;
-  rawContent?: string;
-  suggestion?: string;
-}
-
-/**
- * Parses markdown tables in multiple formats:
- * 1. Pipe tables (standard)
- * 2. Grid tables
- * 3. Minimal tables (without outer pipes)
- */
 export class MarkdownTableParser {
+  /*
+  Parses markdown tables in multiple formats:
+  1. Pipe tables (standard)
+  2. Grid tables
+  3. Minimal tables (without outer pipes)
+  */
   private rawInput: string;
   private lines: string[];
   
@@ -36,15 +17,9 @@ export class MarkdownTableParser {
   
   parse(): ParseResult {
     if (this.lines.length === 0) {
-      return {
-        headers: [],
-        rows: [],
-        errors: [{ type: 'empty_table', message: 'Input is empty' }],
-        metadata: { rowCount: 0, columnCount: 0, hasSeparatorRow: false, formatDetected: 'pipe' }
-      };
+      return this.createEmptyResult('empty_table', 'Input is empty');
     }
     
-    // Detect table format
     const format = this.detectFormat();
     
     try {
@@ -56,43 +31,39 @@ export class MarkdownTableParser {
         case 'minimal':
           return this.parseMinimalTable();
         default:
-          return this.parsePipeTable(); // Default fallback
+          return this.createEmptyResult('format_error', 'Unsupported markdown table format');
       }
     } catch (error) {
-      return {
-        headers: [],
-        rows: [],
-        errors: [{
-          type: 'malformed_row',
-          message: `Parsing failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-          rawContent: this.rawInput.substring(0, 100)
-        }],
-        metadata: { rowCount: 0, columnCount: 0, hasSeparatorRow: false, formatDetected: 'pipe' }
-      };
+      return this.createEmptyResult(
+        'format_error',
+        `Parsing failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
     }
   }
   
-  private detectFormat(): 'pipe' | 'grid' | 'minimal' {
+  private detectFormat(): 'pipe' | 'grid' | 'minimal' | 'unknown' {
+    if (this.lines.length < 2) return 'unknown';
+    
     const firstLine = this.lines[0];
     
     // Grid table detection (has +---+ separators)
-    if (firstLine.includes('+') && firstLine.includes('-')) {
+    if (firstLine.includes('+') && firstLine.match(/[-+]+/)) {
       return 'grid';
     }
     
-    // Pipe table detection (has | characters)
+    // Pipe table detection
     if (firstLine.includes('|')) {
-      // Check if it has a separator row (second line with dashes and pipes)
+      // Check if there's a separator row (second line with dashes and pipes)
       if (this.lines.length >= 2) {
         const secondLine = this.lines[1];
-        if (secondLine.includes('|') && secondLine.includes('-')) {
-          return 'pipe';
-        }
+        const hasSeparator = secondLine.includes('|') && 
+                            (secondLine.includes('-') || secondLine.includes(':'));
+        return hasSeparator ? 'pipe' : 'minimal';
       }
+      return 'minimal'; // No separator row
     }
     
-    // Minimal table (no outer pipes, but consistent spacing)
-    return 'minimal';
+    return 'unknown';
   }
   
   private parsePipeTable(): ParseResult {
@@ -101,56 +72,52 @@ export class MarkdownTableParser {
     
     // Find separator row index
     let separatorIndex = -1;
-    for (let i = 0; i < this.lines.length; i++) {
+    for (let i = 1; i < this.lines.length; i++) {
       if (this.isSeparatorRow(this.lines[i])) {
         separatorIndex = i;
         break;
       }
     }
     
+    // If no separator found but we have pipe structure, assume first line is header
     if (separatorIndex === -1) {
       errors.push({
         type: 'invalid_separator',
         message: 'No separator row found (expected a row with |---|)',
         suggestion: 'Add a separator row with dashes between header and data'
       });
-      // Try to parse without separator
-      separatorIndex = 1; // Assume second line is data
+      separatorIndex = 0; // Treat first line as header
     }
     
-    // Parse headers (line before separator)
-    const headerLine = this.lines[separatorIndex - 1] || this.lines[0];
-    const headers = this.parsePipeLine(headerLine, errors, 0);
+    // Parse headers
+    const headerLine = separatorIndex > 0 ? this.lines[separatorIndex - 1] : this.lines[0];
+    const headers = this.parsePipeLine(headerLine, errors, separatorIndex > 0 ? separatorIndex - 1 : 0);
     
-    // Validate separator matches header count
-    if (separatorIndex > 0 && separatorIndex < this.lines.length) {
-      const separatorCols = this.parsePipeLine(this.lines[separatorIndex], errors, separatorIndex)
-        .filter(col => col && !col.match(/^[-:|]+$/));
-      
-      if (separatorCols.length > 0 && separatorCols.length !== headers.length) {
-        errors.push({
-          type: 'column_mismatch',
-          message: `Separator row has ${separatorCols.length} columns, but header has ${headers.length}`,
-          line: separatorIndex + 1,
-          suggestion: 'Ensure separator row matches header column count'
-        });
-      }
+    if (headers.length === 0) {
+      errors.push({
+        type: 'malformed_row',
+        message: 'No valid headers found',
+        line: separatorIndex > 0 ? separatorIndex : 1,
+        suggestion: 'Check that your header row has proper pipe characters'
+      });
+      return this.createResult(headers, rows, errors, 'pipe', false);
     }
     
-    // Parse data rows (after separator)
-    for (let i = separatorIndex + 1; i < this.lines.length; i++) {
-      if (this.lines[i].trim() === '') continue; // Skip empty lines
-      if (this.isSeparatorRow(this.lines[i])) continue; // Skip extra separators
+    // Start parsing data rows after separator
+    const dataStartIndex = separatorIndex + 1;
+    for (let i = dataStartIndex; i < this.lines.length; i++) {
+      const line = this.lines[i];
+      if (line.trim() === '') continue;
+      if (this.isSeparatorRow(line)) continue;
       
-      const rowValues = this.parsePipeLine(this.lines[i], errors, i);
+      const rowValues = this.parsePipeLine(line, errors, i);
       
-      // Handle column count mismatch
       if (rowValues.length !== headers.length) {
         errors.push({
           type: 'column_mismatch',
-          message: `Row ${i - separatorIndex} has ${rowValues.length} columns, expected ${headers.length}`,
+          message: `Row ${i - dataStartIndex + 1} has ${rowValues.length} columns, expected ${headers.length}`,
           line: i + 1,
-          rawContent: this.lines[i],
+          rawContent: line,
           suggestion: rowValues.length > headers.length 
             ? 'Too many columns - check for extra pipe characters' 
             : 'Too few columns - check for missing values'
@@ -164,58 +131,41 @@ export class MarkdownTableParser {
       }
     }
     
-    return {
-      headers,
-      rows,
-      errors,
-      metadata: {
-        rowCount: rows.length,
-        columnCount: headers.length,
-        hasSeparatorRow: separatorIndex > 0,
-        formatDetected: 'pipe'
-      }
-    };
+    return this.createResult(headers, rows, errors, 'pipe', separatorIndex > 0);
   }
   
   private parsePipeLine(line: string, errors: ParseError[], lineNumber: number): string[] {
-    // Clean the line: remove leading/trailing pipes if they exist
+    // Remove leading/trailing pipes
     let cleanLine = line.trim();
     if (cleanLine.startsWith('|')) cleanLine = cleanLine.substring(1);
     if (cleanLine.endsWith('|')) cleanLine = cleanLine.slice(0, -1);
     
-    // Split by pipe, preserving empty values
-    const cells = cleanLine.split('|').map(cell => {
-      const trimmed = cell.trim();
-      
-      // Handle escaped pipes if any
-      if (trimmed.includes('\\|')) {
-        return trimmed.replace(/\\\|/g, '|');
-      }
-      
-      return trimmed;
+    // Handle escaped pipes
+    const tempMarker = '___PIPE___';
+    const escapedLine = cleanLine.replace(/\\\|/g, tempMarker);
+    
+    // Split by unescaped pipes
+    const cells = escapedLine.split('|').map(cell => {
+      const unescaped = cell.replace(new RegExp(tempMarker, 'g'), '|');
+      return unescaped.trim();
     });
     
-    // Validate cells aren't just separator markers
-    const validCells = cells.filter(cell => {
-      if (cell.match(/^[-:|]+$/) && cell.includes('-')) {
-        // This looks like a separator cell, skip it
-        return false;
-      }
-      return true;
+    // Filter out separator cells
+    return cells.filter(cell => {
+      const isSeparator = cell.match(/^[-: ]+$/);
+      return !isSeparator;
     });
-    
-    return validCells;
   }
   
   private isSeparatorRow(line: string): boolean {
     if (!line.includes('|')) return false;
     
-    const cleanLine = line.trim();
+    const cleanLine = line.trim().replace(/^\|/, '').replace(/\|$/, '');
     const cells = cleanLine.split('|').map(cell => cell.trim());
     
     // Check if all cells contain only dashes, colons, or spaces
     return cells.every(cell => {
-      if (cell === '') return true; // Empty between pipes is okay
+      if (cell === '') return true;
       return !!cell.match(/^[-: ]+$/);
     });
   }
@@ -225,8 +175,6 @@ export class MarkdownTableParser {
     
     headers.forEach((header, index) => {
       const value = index < values.length ? values[index] : '';
-      
-      // Convert string values to appropriate types
       row[header] = this.inferType(value);
     });
     
@@ -238,25 +186,43 @@ export class MarkdownTableParser {
       return null;
     }
     
-    // Check for numbers
-    if (!isNaN(Number(value)) && value.trim() !== '') {
-      const num = Number(value);
-      if (Number.isInteger(num) && !value.includes('.')) {
-        return num;
+    const trimmed = value.trim();
+    
+    // Boolean
+    if (trimmed.toLowerCase() === 'true') return true;
+    if (trimmed.toLowerCase() === 'false') return false;
+    
+    // Integer
+    if (/^-?\d+$/.test(trimmed)) {
+      const intVal = parseInt(trimmed, 10);
+      if (!isNaN(intVal)) return intVal;
+    }
+    
+    // Float
+    if (/^-?\d+\.\d+$/.test(trimmed)) {
+      const floatVal = parseFloat(trimmed);
+      if (!isNaN(floatVal)) return floatVal;
+    }
+    
+    // Date (ISO format)
+    const isoDateRegex = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$/;
+    if (isoDateRegex.test(trimmed)) {
+      const date = new Date(trimmed);
+      if (!isNaN(date.getTime())) return date.toISOString();
+    }
+    
+    // Date (common formats)
+    const dateFormats = [
+      /^\d{2}\/\d{2}\/\d{4}$/, // DD/MM/YYYY
+      /^\d{4}\/\d{2}\/\d{2}$/, // YYYY/MM/DD
+      /^\d{2}-\d{2}-\d{4}$/, // DD-MM-YYYY
+    ];
+    
+    for (const format of dateFormats) {
+      if (format.test(trimmed)) {
+        const date = new Date(trimmed);
+        if (!isNaN(date.getTime())) return date.toISOString();
       }
-      return num;
-    }
-    
-    // Check for booleans
-    const lowerValue = value.toLowerCase();
-    if (lowerValue === 'true' || lowerValue === 'false') {
-      return lowerValue === 'true';
-    }
-    
-    // Check for date/time
-    const date = new Date(value);
-    if (!isNaN(date.getTime()) && value.match(/^\d{4}-\d{2}-\d{2}/)) {
-      return date.toISOString();
     }
     
     // Return as string
@@ -271,32 +237,78 @@ export class MarkdownTableParser {
       return rowValues.slice(0, expectedLength);
     } else {
       // Pad with empty values
-      const padded = [...rowValues];
-      while (padded.length < expectedLength) {
-        padded.push('');
-      }
-      return padded;
+      return [...rowValues, ...Array(expectedLength - rowValues.length).fill('')];
     }
   }
   
-  // Additional format parsers (for future expansion)
+  private getSampleValues(rows: any[], headers: string[], sampleCount: number = 3): { [column: string]: any[] } {
+    const samples: { [column: string]: any[] } = {};
+    
+    headers.forEach(header => {
+      samples[header] = rows
+        .slice(0, sampleCount)
+        .map(row => row[header])
+        .filter(val => val !== null && val !== undefined && val !== '');
+    });
+    
+    return samples;
+  }
+  
   private parseGridTable(): ParseResult {
-    // Implementation for grid tables
-    return {
-      headers: [],
-      rows: [],
-      errors: [{ type: 'malformed_row', message: 'Grid tables not yet supported' }],
-      metadata: { rowCount: 0, columnCount: 0, hasSeparatorRow: false, formatDetected: 'grid' }
-    };
+    // TODO: Implement grid table parsing
+    return this.createEmptyResult(
+      'format_error',
+      'Grid tables are not yet supported',
+      'grid'
+    );
   }
   
   private parseMinimalTable(): ParseResult {
-    // Implementation for minimal tables (without pipes)
+    // TODO: Implement minimal table parsing
+    return this.createEmptyResult(
+      'format_error',
+      'Minimal tables are not yet supported',
+      'minimal'
+    );
+  }
+  
+  private createEmptyResult(
+    errorType: ParseError['type'],
+    errorMessage: string,
+    formatDetected: 'pipe' | 'grid' | 'minimal' | 'unknown' = 'unknown'
+  ): ParseResult {
     return {
       headers: [],
       rows: [],
-      errors: [{ type: 'malformed_row', message: 'Minimal tables not yet supported' }],
-      metadata: { rowCount: 0, columnCount: 0, hasSeparatorRow: false, formatDetected: 'minimal' }
+      errors: [{ type: errorType, message: errorMessage }],
+      metadata: {
+        rowCount: 0,
+        columnCount: 0,
+        hasSeparatorRow: false,
+        formatDetected,
+        sampleValues: {}
+      }
+    };
+  }
+  
+  private createResult(
+    headers: string[],
+    rows: any[],
+    errors: ParseError[],
+    formatDetected: 'pipe' | 'grid' | 'minimal',
+    hasSeparatorRow: boolean
+  ): ParseResult {
+    return {
+      headers,
+      rows,
+      errors,
+      metadata: {
+        rowCount: rows.length,
+        columnCount: headers.length,
+        hasSeparatorRow,
+        formatDetected,
+        sampleValues: this.getSampleValues(rows, headers, 3)
+      }
     };
   }
 }

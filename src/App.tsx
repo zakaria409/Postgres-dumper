@@ -6,21 +6,8 @@ import './App.css';
 import { SmartTextarea } from './components/ui/SmartTextarea';
 import { StatusBar } from './components/layout/StatusBar';
 import { NavigationSidebar } from './components/layout/NavigationSidebar';
+import { ParseResult, DataFormat } from './types';
 
-// Temporary types until we create the actual ones
-type DataFormat = 'markdown' | 'json' | 'csv' | 'unknown';
-
-interface ParseResult {
-  headers: string[];
-  rows: any[];
-  errors: any[];
-  metadata: {
-    rowCount: number;
-    columnCount: number;
-    hasSeparatorRow: boolean;
-    formatDetected: string;
-  };
-}
 
 function App() {
   const [input, setInput] = useState('');

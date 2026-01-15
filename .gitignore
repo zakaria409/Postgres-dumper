@@ -10,7 +10,12 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+target
 *.local
+*.lock
+*.tmp
+.env
+gen
 
 # Editor directories and files
 .vscode/*
@@ -23,5 +28,3 @@ dist-ssr
 *.sln
 *.sw?
 
-.env
-gen

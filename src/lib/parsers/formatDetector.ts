@@ -1,19 +1,17 @@
-// lib/parsers/formatDetector.ts
+import { DataFormat } from '../../types';
 import { MarkdownTableParser } from './markdownParser';
-
-export type DataFormat = 'markdown' | 'json' | 'csv' | 'unknown';
 
 export const detectFormat = (input: string): DataFormat => {
   const trimmed = input.trim();
   if (trimmed.length === 0) return 'unknown';
   
-  // 1. Check for markdown table (priority #1)
+  // Priority 1: Markdown table
   if (isMarkdownTable(trimmed)) return 'markdown';
   
-  // 2. Check for JSON
+  // Priority 2: JSON
   if (isJSON(trimmed)) return 'json';
   
-  // 3. Check for CSV
+  // Priority 3: CSV
   if (isCSV(trimmed)) return 'csv';
   
   return 'unknown';
@@ -25,28 +23,54 @@ const isMarkdownTable = (input: string): boolean => {
   // Need at least 2 lines for a valid markdown table
   if (lines.length < 2) return false;
   
-  // Check for pipe structure in first line
-  const firstLine = lines[0].trim();
-  if (!firstLine.includes('|')) return false;
+  // Quick check: first line must have pipes or grid markers
+  const firstLine = lines[0];
+  if (!firstLine.includes('|') && !firstLine.includes('+')) return false;
   
-  // Count pipes in first line
-  const pipeCount = (firstLine.match(/\|/g) || []).length;
-  if (pipeCount < 2) return false; // Need at least 2 pipes for a table
-  
-  // Check if it could be a markdown table with separator
-  const parser = new MarkdownTableParser(input);
-  const result = parser.parse();
-  
-  // Consider it markdown if we successfully parsed headers and at least one row
-  return result.headers.length > 0 && result.errors.length === 0;
+  // Use the parser to validate
+  try {
+    const parser = new MarkdownTableParser(input);
+    const result = parser.parse();
+    
+    // Consider it markdown if we successfully parsed headers
+    // Allow some errors (like missing separator) but need valid headers
+    return result.headers.length > 0 && result.errors.every(e => 
+      e.type !== 'malformed_row' && e.type !== 'empty_table'
+    );
+  } catch {
+    return false;
+  }
 };
 
 const isJSON = (input: string): boolean => {
+  const trimmed = input.trim();
+  
+  // Must start with [ or {
+  if (!trimmed.startsWith('[') && !trimmed.startsWith('{')) return false;
+  
   try {
-    const parsed = JSON.parse(input);
-    // We want arrays of objects or single objects
+    const parsed = JSON.parse(trimmed);
+    // Valid JSON that's either an array or object
     return Array.isArray(parsed) || (typeof parsed === 'object' && parsed !== null);
   } catch {
+    // Try to see if it's NDJSON (newline-delimited JSON)
+    if (trimmed.includes('\n')) {
+      const lines = trimmed.split('\n').filter(line => line.trim());
+      try {
+        // Try to parse each line as JSON
+        const allValid = lines.every(line => {
+          try {
+            JSON.parse(line);
+            return true;
+          } catch {
+            return false;
+          }
+        });
+        return allValid && lines.length > 0;
+      } catch {
+        return false;
+      }
+    }
     return false;
   }
 };
@@ -55,27 +79,60 @@ const isCSV = (input: string): boolean => {
   const lines = input.split('\n').filter(line => line.trim());
   if (lines.length < 2) return false;
   
-  // Check for consistent delimiter
   const firstLine = lines[0];
-  const commaCount = (firstLine.match(/,/g) || []).length;
-  const semicolonCount = (firstLine.match(/;/g) || []).length;
-  const tabCount = (firstLine.match(/\t/g) || []).length;
   
-  // Needs a delimiter and consistent column count
-  if (commaCount > 0 || semicolonCount > 0 || tabCount > 0) {
-    const delimiter = commaCount > semicolonCount && commaCount > tabCount ? ',' : 
-                     semicolonCount > tabCount ? ';' : '\t';
-    
-    const firstCols = lines[0].split(delimiter).length;
-    
-    // Check if at least 80% of lines have same column count
-    const consistentLines = lines.filter(line => {
-      const cols = line.split(delimiter).length;
-      return cols === firstCols;
-    }).length;
-    
-    return consistentLines / lines.length > 0.8;
-  }
+  // Check for common delimiters
+  const delimiters = [
+    { char: ',', count: (firstLine.match(/,/g) || []).length },
+    { char: ';', count: (firstLine.match(/;/g) || []).length },
+    { char: '\t', count: (firstLine.match(/\t/g) || []).length },
+    { char: '|', count: (firstLine.match(/\|/g) || []).length },
+  ];
   
-  return false;
+  // Find the most common delimiter
+  delimiters.sort((a, b) => b.count - a.count);
+  const primaryDelimiter = delimiters[0];
+  
+  // Need at least one delimiter in first line
+  if (primaryDelimiter.count === 0) return false;
+  
+  const firstColCount = firstLine.split(primaryDelimiter.char).length;
+  
+  // Check if most lines have the same column count
+  const consistentLines = lines.filter(line => {
+    const cols = line.split(primaryDelimiter.char).length;
+    return cols === firstColCount;
+  }).length;
+  
+  const consistencyRatio = consistentLines / lines.length;
+  
+  // Require high consistency for CSV
+  return consistencyRatio > 0.8 && firstColCount > 1;
+};
+
+export const getFormatDetails = (format: DataFormat) => {
+  const details = {
+    markdown: {
+      label: 'Markdown Table',
+      color: 'blue',
+      icon: '📊'
+    },
+    json: {
+      label: 'JSON',
+      color: 'green',
+      icon: '📄'
+    },
+    csv: {
+      label: 'CSV',
+      color: 'purple',
+      icon: '📋'
+    },
+    unknown: {
+      label: 'Unknown Format',
+      color: 'gray',
+      icon: '❓'
+    }
+  };
+  
+  return details[format];
 };
