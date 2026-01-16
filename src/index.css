@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gunmetal text-gray-100;
+    font-family: 'Inter', sans-serif;
+  }
+}
+
+:root {
+  --ember: #BF560D;
+  --taupe-grey: #62544F;
+  --khaki-beige: #C2AE97;
+  --taupe: #554238;
+  --gunmetal: #343738;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #343738;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #554238;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #62544F;
+}
