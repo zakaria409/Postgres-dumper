@@ -5,6 +5,9 @@ export interface ColumnMapping {
   target: string;
   confidence: number; // 0-1 for auto-mapping
   transform?: (value: any) => any;
+  sourceType?: string;
+  targetType?: string;
+  isIgnored?: boolean; // Useful for skipping columns
 }
 
 export interface ValidationError {
@@ -35,15 +38,6 @@ export interface ParseResult {
     formatDetected: 'pipe' | 'grid' | 'minimal' | 'unknown';
     sampleValues: { [column: string]: any[] };
   };
-}
-
-export interface ColumnMapping {
-  source: string;
-  target: string;
-  confidence: number; // 0-1 for auto-mapping
-  transform?: (value: any) => any;
-  sourceType?: string;
-  targetType?: string;
 }
 
 export interface DatabaseConnection {

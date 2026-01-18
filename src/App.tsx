@@ -1,56 +1,177 @@
 import { useState, useEffect } from 'react';
 import { MainLayout } from './components/layout/MainLayout';
 import { DataInputArea } from './components/data-input/DataInputArea';
-import { ParseResult } from './types';
-import { CheckCircle2 } from 'lucide-react';
+import { ColumnMapper } from './components/mapping/ColumnMapper';
+import { ConnectionSetup } from './components/connection/ConnectionSetup';
+import { generateSql } from './lib/generators/sqlGenerator';
+import { ParseResult, ColumnMapping, DatabaseConnection } from './types';
+import { CheckCircle2, ChevronRight, FileCode, Copy, RefreshCw, ArrowLeft, Database, Play, AlertTriangle, Loader2 } from 'lucide-react';
+import { SmartTextarea } from './components/ui/SmartTextarea';
+import { invoke } from '@tauri-apps/api/core';
+import { cn } from './lib/utils';
+
+type Step = 'input' | 'preview' | 'mapping' | 'result';
 
 function App() {
-  const [isConnected, setIsConnected] = useState(false);
-  const [parseResult, setParseResult] = useState<ParseResult | null>(null);
-  const [showNotification, setShowNotification] = useState(false);
+  const [activeConnection, setActiveConnection] = useState<DatabaseConnection | null>(null);
+  const [showConnectionSetup, setShowConnectionSetup] = useState(false);
 
-  // Simulate connection status
+  const [step, setStep] = useState<Step>('input');
+  const [parseResult, setParseResult] = useState<ParseResult | null>(null);
+  const [mappings, setMappings] = useState<ColumnMapping[]>([]);
+  const [sqlOutput, setSqlOutput] = useState('');
+  const [tableName, setTableName] = useState('public.imported_data');
+  const [showNotification, setShowNotification] = useState(false);
+  const [notificationMsg, setNotificationMsg] = useState('Successfully Parsed!');
+
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [executionResult, setExecutionResult] = useState<{ success: boolean, message: string } | null>(null);
+
+  // Load connection from local storage on mount (simulated)
   useEffect(() => {
-    const timer = setTimeout(() => setIsConnected(true), 1500);
-    return () => clearTimeout(timer);
+    const saved = localStorage.getItem('active_connection');
+    if (saved) {
+      try {
+        setActiveConnection(JSON.parse(saved));
+      } catch (e) {
+        console.error('Failed to load saved connection', e);
+      }
+    }
   }, []);
+
+  const handleConnectionSaved = (conn: DatabaseConnection) => {
+    setActiveConnection(conn);
+    localStorage.setItem('active_connection', JSON.stringify(conn));
+    setShowConnectionSetup(false);
+    showToast(`Connected to ${conn.name}`);
+  };
+
+  const showToast = (msg: string) => {
+    setNotificationMsg(msg);
+    setShowNotification(true);
+    setTimeout(() => setShowNotification(false), 3000);
+  };
 
   const handleParse = (result: ParseResult) => {
     setParseResult(result);
+    setStep('preview');
     if (result.rows.length > 0) {
-      setShowNotification(true);
-      setTimeout(() => setShowNotification(false), 3000);
+      showToast(`Detected ${result.metadata.formatDetected} format`);
+    }
+  };
+
+  const handleMappingComplete = (newMappings: ColumnMapping[]) => {
+    setMappings(newMappings);
+  };
+
+  const handleGenerateSql = () => {
+    if (!parseResult) return;
+    const sql = generateSql(parseResult, mappings, tableName);
+    setSqlOutput(sql);
+    setStep('result');
+  };
+
+  const handleReset = () => {
+    setStep('input');
+    setParseResult(null);
+    setMappings([]);
+    setSqlOutput('');
+    setExecutionResult(null);
+  };
+
+  const handleExecute = async () => {
+    if (!activeConnection || !sqlOutput) return;
+
+    setIsExecuting(true);
+    setExecutionResult(null);
+
+    // Reconstruct connection string (assuming we stored password, or prompting if not secure)
+    // NOTE: In a real app, storing password in localStorage is insecure. 
+    // We are retrieving it from the activeConnection state which is in memory.
+    const connStr = `postgresql://${activeConnection.username}:${(activeConnection as any).password}@${activeConnection.host}:${activeConnection.port}/${activeConnection.database}`;
+
+    try {
+      const res = await invoke<string>('execute_sql', {
+        connectionString: connStr,
+        sql: sqlOutput
+      });
+      setExecutionResult({ success: true, message: res });
+      showToast('SQL Executed Successfully!');
+    } catch (err) {
+      setExecutionResult({ success: false, message: String(err) });
+    } finally {
+      setIsExecuting(false);
     }
   };
 
   return (
-    <MainLayout isConnected={isConnected}>
-      <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-        {/* Welcome Header */}
-        <div className="relative overflow-hidden bg-gradient-to-br from-gunmetal to-taupe/40 p-10 rounded-3xl border border-taupe shadow-2xl">
-          <div className="relative z-10">
-            <h2 className="text-4xl font-black text-white tracking-tight mb-3">
-              Ready to <span className="text-ember">Dump</span>?
-            </h2>
-            <p className="text-gray-400 text-lg max-w-xl leading-relaxed">
-              Connect to your PostgreSQL instance, paste your data, and we'll handle the rest.
-              Zero configuration for repeat exports.
-            </p>
-          </div>
-          <div className="absolute top-0 right-0 w-64 h-64 bg-ember/10 rounded-full blur-3xl -mr-20 -mt-20" />
+    <MainLayout isConnected={!!activeConnection}>
+      {/* Connection Setup Modal */}
+      {showConnectionSetup && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <ConnectionSetup
+            onConnectionSaved={handleConnectionSaved}
+            onCancel={() => setShowConnectionSetup(false)}
+            initialConnection={activeConnection}
+          />
         </div>
+      )}
 
-        {/* Data Input Area */}
-        <section>
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-1.5 h-6 bg-ember rounded-full" />
-            <h3 className="text-xl font-bold text-white tracking-wide">Data Source</h3>
+      {/* Top Bar Connection Trigger */}
+      <div className="absolute top-4 right-6 z-40">
+        <button
+          onClick={() => setShowConnectionSetup(true)}
+          className="flex items-center gap-2 text-xs font-bold bg-gunmetal border border-taupe px-3 py-1.5 rounded-full hover:bg-taupe transition-colors text-gray-400 hover:text-white"
+        >
+          <Database className={cn("w-3 h-3", activeConnection ? "text-emerald-500" : "text-gray-500")} />
+          {activeConnection ? activeConnection.name : "Connect Database"}
+        </button>
+      </div>
+
+      <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20 mt-8">
+
+        {/* Progress Stepper */}
+        {step !== 'input' && (
+          <div className="flex items-center gap-4 text-sm text-gray-500 mb-8">
+            <button onClick={handleReset} className="hover:text-ember transition-colors">Input</button>
+            <ChevronRight className="w-4 h-4" />
+            <span className={step === 'preview' ? 'text-ember font-bold' : ''}>Preview</span>
+            <ChevronRight className="w-4 h-4" />
+            <span className={step === 'mapping' ? 'text-ember font-bold' : ''}>Mapping</span>
+            <ChevronRight className="w-4 h-4" />
+            <span className={step === 'result' ? 'text-ember font-bold' : ''}>SQL</span>
           </div>
-          <DataInputArea onParse={handleParse} />
-        </section>
+        )}
 
-        {/* Preview Section */}
-        {parseResult && (
+        {/* Welcome Header */}
+        {step === 'input' && (
+          <div className="relative overflow-hidden bg-gradient-to-br from-gunmetal to-taupe/40 p-10 rounded-3xl border border-taupe shadow-2xl">
+            <div className="relative z-10">
+              <h2 className="text-4xl font-black text-white tracking-tight mb-3">
+                Ready to <span className="text-ember">Dump</span>?
+              </h2>
+              <p className="text-gray-400 text-lg max-w-xl leading-relaxed">
+                Connect to your PostgreSQL instance, paste your data, and we'll handle the rest.
+                Zero configuration for repeat exports.
+              </p>
+            </div>
+            <div className="absolute top-0 right-0 w-64 h-64 bg-ember/10 rounded-full blur-3xl -mr-20 -mt-20" />
+          </div>
+        )}
+
+        {/* STEP 1: INPUT */}
+        {step === 'input' && (
+          <section>
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-1.5 h-6 bg-ember rounded-full" />
+              <h3 className="text-xl font-bold text-white tracking-wide">Data Source</h3>
+            </div>
+            <DataInputArea onParse={handleParse} />
+          </section>
+        )}
+
+        {/* STEP 2: PREVIEW */}
+        {step === 'preview' && parseResult && (
           <section className="animate-in zoom-in-95 duration-500">
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
@@ -92,37 +213,155 @@ function App() {
                   </tbody>
                 </table>
               </div>
-              {parseResult.rows.length > 5 && (
-                <div className="p-4 bg-gunmetal/30 text-center border-t border-taupe">
-                  <p className="text-xs text-gray-500 font-medium">
-                    Showing first 5 rows of {parseResult.rows.length}
-                  </p>
-                </div>
-              )}
             </div>
 
             <div className="mt-8 flex justify-end gap-4">
-              <button className="px-8 py-3 rounded-xl border border-taupe text-gray-400 hover:text-white hover:bg-taupe/20 font-bold transition-all">
+              <button
+                onClick={handleReset}
+                className="px-8 py-3 rounded-xl border border-taupe text-gray-400 hover:text-white hover:bg-taupe/20 font-bold transition-all"
+              >
                 Discard
               </button>
-              <button className="px-10 py-3 rounded-xl bg-ember hover:bg-ember-hover text-white font-bold shadow-lg shadow-ember/20 transition-all flex items-center gap-2 group">
+              <button
+                onClick={() => setStep('mapping')}
+                className="px-10 py-3 rounded-xl bg-ember hover:bg-ember-hover text-white font-bold shadow-lg shadow-ember/20 transition-all flex items-center gap-2 group"
+              >
                 Continue to Mapping
                 <span className="group-hover:translate-x-1 transition-transform">→</span>
               </button>
             </div>
           </section>
         )}
+
+        {/* STEP 3: MAPPING */}
+        {step === 'mapping' && parseResult && (
+          <section className="animate-in slide-in-from-right-8 duration-500">
+            <div className="mb-8 flex items-end gap-4">
+              <div className="flex-1">
+                <label className="block text-xs font-bold uppercase text-gray-500 mb-2">Target Table Name</label>
+                <input
+                  type="text"
+                  value={tableName}
+                  onChange={(e) => setTableName(e.target.value)}
+                  className="bg-gunmetal border border-taupe px-4 py-3 rounded-xl text-white w-full max-w-md focus:border-ember focus:ring-1 focus:ring-ember outline-none font-mono"
+                />
+              </div>
+            </div>
+
+            <ColumnMapper
+              parseResult={parseResult}
+              onMappingComplete={handleMappingComplete}
+            />
+
+            <div className="mt-8 flex justify-end gap-4">
+              <button
+                onClick={() => setStep('preview')}
+                className="px-8 py-3 rounded-xl border border-taupe text-gray-400 hover:text-white hover:bg-taupe/20 font-bold transition-all flex items-center gap-2"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Back
+              </button>
+              <button
+                onClick={handleGenerateSql}
+                className="px-10 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold shadow-lg shadow-emerald-900/20 transition-all flex items-center gap-2"
+              >
+                <FileCode className="w-5 h-5" />
+                Generate SQL
+              </button>
+            </div>
+          </section>
+        )}
+
+        {/* STEP 4: RESULT */}
+        {step === 'result' && sqlOutput && (
+          <section className="animate-in slide-in-from-bottom-8 duration-500">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="w-1.5 h-6 bg-emerald-500 rounded-full" />
+                <h3 className="text-xl font-bold text-white tracking-wide">Generated SQL</h3>
+              </div>
+              <div className="flex gap-4">
+                {!activeConnection ? (
+                  <button
+                    onClick={() => setShowConnectionSetup(true)}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-ember text-white shadow-lg shadow-ember/20 hover:bg-ember-hover text-sm font-bold animate-pulse"
+                  >
+                    <Database className="w-4 h-4" />
+                    Connect to Execute
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleExecute}
+                    disabled={isExecuting}
+                    className={cn(
+                      "flex items-center gap-2 px-4 py-2 rounded-lg text-white shadow-lg text-sm font-bold transition-all",
+                      isExecuting ? "bg-taupe text-gray-400 cursor-not-allowed" : "bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/20"
+                    )}
+                  >
+                    {isExecuting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                    {isExecuting ? 'Executing...' : 'Execute in DB'}
+                  </button>
+                )}
+
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(sqlOutput);
+                    showToast('Copied to clipboard');
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-taupe/50 text-khaki-beige hover:text-white border border-taupe hover:bg-taupe text-sm font-medium transition-colors"
+                >
+                  <Copy className="w-4 h-4" />
+                  Copy
+                </button>
+
+                <button
+                  onClick={handleReset}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg border border-taupe text-gray-400 hover:text-white text-sm font-medium"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  New Import
+                </button>
+              </div>
+            </div>
+
+            <div className="relative">
+              <SmartTextarea
+                value={sqlOutput}
+                readOnly
+                className="min-h-[400px] font-mono text-sm bg-gunmetal border-taupe text-green-400 selection:bg-green-900/30"
+              />
+
+              {/* Execution Result Overlay */}
+              {executionResult && (
+                <div className={cn(
+                  "absolute bottom-4 left-4 right-4 p-4 rounded-xl border backdrop-blur-md shadow-2xl animate-in slide-in-from-bottom-2",
+                  executionResult.success
+                    ? "bg-emerald-900/90 border-emerald-500/50 text-emerald-100"
+                    : "bg-red-900/90 border-red-500/50 text-red-100"
+                )}>
+                  <div className="flex items-start gap-3">
+                    {executionResult.success ? <CheckCircle2 className="w-5 h-5 text-emerald-400 mt-0.5" /> : <AlertTriangle className="w-5 h-5 text-red-400 mt-0.5" />}
+                    <div>
+                      <h4 className="font-bold mb-1">{executionResult.success ? 'Execution Successful' : 'Execution Failed'}</h4>
+                      <p className="text-sm opacity-90 font-mono">{executionResult.message}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
       </div>
 
       {/* Notification Toast */}
       {showNotification && (
-        <div className="fixed bottom-10 right-10 bg-emerald-600 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-4 animate-in slide-in-from-right-10 duration-500 ring-4 ring-emerald-600/20 backdrop-blur-md">
+        <div className="fixed bottom-10 right-10 bg-emerald-600 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-4 animate-in slide-in-from-right-10 duration-500 ring-4 ring-emerald-600/20 backdrop-blur-md z-50">
           <div className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center">
             <CheckCircle2 className="w-5 h-5 text-white" />
           </div>
           <div>
-            <p className="font-bold text-sm">Successfully Parsed!</p>
-            <p className="text-white/80 text-xs">Detected {parseResult?.metadata.formatDetected} format</p>
+            <p className="font-bold text-sm">{notificationMsg}</p>
           </div>
         </div>
       )}
