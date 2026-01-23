@@ -5,14 +5,15 @@ import { StatusBar } from './StatusBar';
 interface MainLayoutProps {
     children: React.ReactNode;
     isConnected: boolean;
+    dbName?: string;
 }
 
-export function MainLayout({ children, isConnected }: MainLayoutProps) {
+export function MainLayout({ children, isConnected, dbName }: MainLayoutProps) {
     return (
         <div className="flex h-screen w-full bg-gunmetal overflow-hidden">
             <NavigationSidebar />
             <div className="flex-1 flex flex-col min-w-0">
-                <StatusBar isConnected={isConnected} />
+                <StatusBar isConnected={isConnected} dbName={dbName} />
                 <main className="flex-1 overflow-y-auto p-8 relative">
                     <div className="max-w-[1200px] mx-auto">
                         {children}

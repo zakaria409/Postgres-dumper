@@ -1,5 +1,4 @@
-import React from 'react';
-import { Settings, ShieldCheck, Activity } from 'lucide-react';
+import { Settings, ShieldCheck } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 interface StatusBarProps {
@@ -32,7 +31,7 @@ export function StatusBar({ isConnected, dbName = 'localhost:5432', className }:
                     )} />
                     <span className="flex items-center gap-1">
                         <ShieldCheck className="w-3 h-3" />
-                        {isConnected ? `Connected: ${dbName}` : 'Reconnecting...'}
+                        {isConnected ? `Connected: ${dbName}` : 'Not Connected'}
                     </span>
                 </div>
 
