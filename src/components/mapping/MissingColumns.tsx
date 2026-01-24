@@ -123,7 +123,7 @@ export function MissingColumns({
                                                             FK to {col.columnInfo.foreignKeyTable}
                                                         </span>
                                                     )}
-                                                    {!col.columnInfo.isNullable && (
+                                                    {col.columnInfo.isNullable === false && (
                                                         <span className="px-2 py-0.5 rounded text-xs font-bold bg-red-500/20 text-red-300 border border-red-500/30">
                                                             REQUIRED
                                                         </span>

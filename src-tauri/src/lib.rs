@@ -147,6 +147,7 @@ async fn get_tables(connection_string: String) -> Result<Vec<String>, String> {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct ColumnInfo {
     name: String,
     data_type: String,
