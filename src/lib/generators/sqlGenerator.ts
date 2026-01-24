@@ -74,7 +74,7 @@ export function generateSql(
 
 function formatValue(value: any, type?: string): string {
     if (value === null || value === undefined) return 'NULL';
-    if (value === '') return 'NULL';
+    if (value === '' || value === 'null') return 'NULL'; // Explicit check for string "null"
 
     if (type === 'number') {
         const num = Number(value);

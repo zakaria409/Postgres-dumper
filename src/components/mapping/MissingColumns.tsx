@@ -20,17 +20,22 @@ export function MissingColumns({
     // Fetch options for foreign key columns
     useEffect(() => {
         const fetchForeignKeyOptions = async () => {
-            const fkColumns = missingColumns.filter(mc => mc.isForeignKey && mc.columnInfo.foreignKeyTable);
+            const fkColumns = missingColumns.filter(mc => {
+                return mc.isForeignKey && mc.columnInfo.foreignKeyTable;
+            });
 
             for (const fkCol of fkColumns) {
                 if (!fkCol.columnInfo.foreignKeyTable) continue;
 
                 const cacheKey = `${fkCol.columnInfo.foreignKeyTable}`;
-                if (foreignKeyOptions[cacheKey]) continue; // Already fetched
+                if (foreignKeyOptions[cacheKey]) {
+                    continue;
+                }
 
                 try {
                     // Fetch all rows from the foreign table
-                    const query = `SELECT * FROM ${fkCol.columnInfo.foreignKeyTable} ORDER BY ${fkCol.columnInfo.foreignKeyColumn} LIMIT 100`;
+                    const query = `SELECT * FROM "${fkCol.columnInfo.foreignKeyTable}" LIMIT 100`; // Removed ORDER BY to simplify and quoted table name
+
                     const result = await invoke<any[]>('execute_query', {
                         connectionString,
                         query
@@ -41,13 +46,26 @@ export function MissingColumns({
                     if (!sampleRow) continue;
 
                     const displayCol = Object.keys(sampleRow).find(key =>
-                        key.includes('name') || key.includes('title') || key.includes('email')
-                    ) || Object.keys(sampleRow).find(key => key !== fkCol.columnInfo.foreignKeyColumn);
+                        key.toLowerCase().includes('name') ||
+                        key.toLowerCase().includes('title') ||
+                        key.toLowerCase().includes('email')
+                    ) || Object.keys(sampleRow)[0]; // Fallback to first column
 
-                    const options = result.map(row => ({
-                        value: String(row[fkCol.columnInfo.foreignKeyColumn!]),
-                        label: displayCol ? `${row[displayCol]} (ID: ${row[fkCol.columnInfo.foreignKeyColumn!]})` : String(row[fkCol.columnInfo.foreignKeyColumn!])
-                    }));
+                    const options = result.map(row => {
+                        // Case-insensitive lookup for the ID column
+                        const targetKey = fkCol.columnInfo.foreignKeyColumn?.toLowerCase();
+                        const rowKey = Object.keys(row).find(k => k.toLowerCase() === targetKey) || fkCol.columnInfo.foreignKeyColumn;
+                        const val = row[rowKey as string];
+
+                        // Safety check for null values
+                        const safeVal = (val === null || val === undefined) ? 'null' : String(val);
+                        const displayVal = displayCol ? row[displayCol] : safeVal;
+
+                        return {
+                            value: safeVal,
+                            label: displayVal ? `${displayVal} (ID: ${safeVal})` : safeVal
+                        };
+                    }).filter(opt => opt.value !== 'null'); // Filter out rows where ID is null (shouldn't happen for PKs)
 
                     setForeignKeyOptions(prev => ({
                         ...prev,

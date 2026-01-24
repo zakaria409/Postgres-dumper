@@ -36,7 +36,7 @@ export interface ParseResult {
     rowCount: number;
     columnCount: number;
     hasSeparatorRow: boolean;
-    formatDetected: 'pipe' | 'grid' | 'minimal' | 'unknown';
+    formatDetected: 'pipe' | 'grid' | 'minimal' | 'json' | 'csv' | 'unknown';
     sampleValues: { [column: string]: any[] };
   };
 }

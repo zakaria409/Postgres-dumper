@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { MarkdownTableParser } from '../../lib/parsers/markdownParser';
+import { JsonParser } from '../../lib/parsers/jsonParser';
 import { detectFormat, getFormatDetails } from '../../lib/parsers/formatDetector';
 import { DataFormat, ParseResult } from '../../types';
 
@@ -47,8 +48,10 @@ export const SmartTextarea: React.FC<SmartTextareaProps> = ({
 
     if (autoParse && format === 'markdown') {
       parseMarkdown(debouncedValue);
+    } else if (autoParse && format === 'json') {
+      parseJson(debouncedValue);
     } else if (autoParse && format !== 'unknown') {
-      // TODO: Add JSON and CSV parsers when ready
+      // TODO: Add CSV parser when ready
       setParseResult(null);
     } else {
       setParseResult(null);
@@ -67,6 +70,39 @@ export const SmartTextarea: React.FC<SmartTextareaProps> = ({
     } catch (error) {
       console.error('Failed to parse markdown:', error);
       // Set an error result
+      const errorResult: ParseResult = {
+        headers: [],
+        rows: [],
+        errors: [{
+          type: 'format_error',
+          message: `Parsing error: ${error instanceof Error ? error.message : 'Unknown error'}`
+        }],
+        metadata: {
+          rowCount: 0,
+          columnCount: 0,
+          hasSeparatorRow: false,
+          formatDetected: 'unknown',
+          sampleValues: {}
+        }
+      };
+      setParseResult(errorResult);
+      onParseResult?.(errorResult);
+    } finally {
+      setIsParsing(false);
+    }
+  }, [onParseResult]);
+
+  const parseJson = useCallback(async (content: string) => {
+    if (!content.trim()) return;
+
+    setIsParsing(true);
+    try {
+      const parser = new JsonParser(content);
+      const result = parser.parse();
+      setParseResult(result);
+      onParseResult?.(result);
+    } catch (error) {
+      console.error('Failed to parse JSON:', error);
       const errorResult: ParseResult = {
         headers: [],
         rows: [],
