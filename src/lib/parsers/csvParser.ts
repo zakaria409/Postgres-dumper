@@ -87,22 +87,43 @@ export class CsvParser {
         const values: string[] = [];
         let currentValue = '';
         let insideQuotes = false;
+        let bracketDepth = 0;
+        let braceDepth = 0;
 
         for (let i = 0; i < line.length; i++) {
             const char = line[i];
             const nextChar = line[i + 1];
 
-            if (char === '"') {
+            // Handle quotes - but skip if we're inside JSON structures
+            if (char === '"' && bracketDepth === 0 && braceDepth === 0) {
                 if (insideQuotes && nextChar === '"') {
-                    // Escaped quote
+                    // Escaped quote in CSV
                     currentValue += '"';
                     i++; // Skip next quote
                 } else {
-                    // Toggle quotes
+                    // Toggle CSV quotes
                     insideQuotes = !insideQuotes;
                 }
-            } else if (char === this.delimiter && !insideQuotes) {
-                // End of value
+            }
+            // Track JSON brackets and braces
+            else if (char === '[' && !insideQuotes) {
+                bracketDepth++;
+                currentValue += char;
+            }
+            else if (char === ']' && !insideQuotes) {
+                bracketDepth--;
+                currentValue += char;
+            }
+            else if (char === '{' && !insideQuotes) {
+                braceDepth++;
+                currentValue += char;
+            }
+            else if (char === '}' && !insideQuotes) {
+                braceDepth--;
+                currentValue += char;
+            }
+            // Only split on delimiter when not inside quotes or JSON structures
+            else if (char === this.delimiter && !insideQuotes && bracketDepth === 0 && braceDepth === 0) {
                 values.push(currentValue);
                 currentValue = '';
             } else {

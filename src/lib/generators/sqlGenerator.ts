@@ -42,25 +42,19 @@ export function generateSql(
                     const val = row[m.source];
                     if (val === null || val === undefined || val === '') return 'NULL';
                     const formattedVal = formatValue(val, 'string');
-                    return `(SELECT ${link.foreignKey} FROM ${link.foreignTable} WHERE ${link.foreignLabel} = ${formattedVal} LIMIT 1)`;
+                    // Use foreignKey in WHERE clause since val is the actual FK value, not the display label
+                    return `(SELECT ${link.foreignKey} FROM ${link.foreignTable} WHERE ${link.foreignKey} = ${formattedVal} LIMIT 1)`;
                 }
 
                 const val = row[m.source];
-                return formatValue(val, m.sourceType);
+                // Use targetType if available, otherwise sourceType
+                return formatValue(val, m.targetType || m.sourceType);
             });
 
             // 2. Handle missing columns (static values)
             const missingValues = tableMissingCols.map(mc => {
-                // Infer type from Postgres data type
-                let type = 'string';
-                const dt = mc.columnInfo.dataType.toLowerCase();
-                if (dt.includes('int') || dt.includes('numeric') || dt.includes('float') || dt.includes('double')) {
-                    type = 'number';
-                } else if (dt.includes('bool')) {
-                    type = 'boolean';
-                }
-
-                return formatValue(mc.value, type);
+                // Use the column's actual data type from the database
+                return formatValue(mc.value, mc.columnInfo.dataType);
             });
 
             return `\n  (${[...mappedValues, ...missingValues].join(', ')})`;
@@ -74,16 +68,51 @@ export function generateSql(
 
 function formatValue(value: any, type?: string): string {
     if (value === null || value === undefined) return 'NULL';
-    if (value === '' || value === 'null') return 'NULL'; // Explicit check for string "null"
+    if (value === '' || value === 'null') return 'NULL';
 
-    if (type === 'number') {
+    // Handle JSON/array types
+    const typeLower = (type || '').toLowerCase();
+
+    // Check if it's a JSON type
+    if (typeLower.includes('json') || typeLower.includes('[]')) {
+        // If value looks like a JSON array but has lost its quotes
+        if (typeof value === 'string' && value.startsWith('[') && value.endsWith(']')) {
+            // Check if it's already valid JSON
+            try {
+                JSON.parse(value);
+                // Valid JSON, escape single quotes for SQL
+                const escaped = value.replace(/'/g, "''");
+                return `'${escaped}'`;
+            } catch {
+                // Not valid JSON - might be missing quotes
+                // Try to parse as CSV-style array and convert to JSON
+                const items = value.slice(1, -1).split(',');
+                const jsonItems = items.map(item => {
+                    const trimmed = item.trim();
+                    // If item doesn't have quotes, add them
+                    if (!trimmed.startsWith('"') && !trimmed.startsWith("'")) {
+                        return `"${trimmed.replace(/"/g, '\\"')}"`;
+                    }
+                    return trimmed;
+                });
+                const jsonArray = `[${jsonItems.join(',')}]`;
+                const escaped = jsonArray.replace(/'/g, "''");
+                return `'${escaped}'`;
+            }
+        }
+    }
+
+    // Handle other types
+    if (typeLower.includes('int') || typeLower.includes('numeric') ||
+        typeLower.includes('float') || typeLower.includes('double') ||
+        typeLower.includes('decimal') || typeLower.includes('real')) {
         const num = Number(value);
         return isNaN(num) ? 'NULL' : String(num);
     }
 
-    if (type === 'boolean') {
+    if (typeLower.includes('bool')) {
         const s = String(value).toLowerCase();
-        return (s === 'true' || s === '1' || s === 'yes' || s === 't') ? 'true' : 'false';
+        return (s === 'true' || s === '1' || s === 'yes' || s === 't' || s === 'y') ? 'true' : 'false';
     }
 
     // String/Date escaping

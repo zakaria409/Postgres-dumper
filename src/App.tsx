@@ -40,23 +40,22 @@ function App() {
     if (saved) {
       try {
         const conn = JSON.parse(saved);
-        console.log('[App] Parsed connection from localStorage:', {
+        console.log('[App] Parsed connection:', {
           name: conn.name,
-          hasPassword: !!(conn as any).password,
-          passwordValue: (conn as any).password
+          hasPassword: !!(conn.password),
+          host: conn.host,
+          database: conn.database
         });
-        setActiveConnection(conn);
+
+        // Ensure password field exists (for backward compatibility)
+        const fullConn: DatabaseConnection = {
+          ...conn,
+          password: conn.password || '' // Default to empty string if missing
+        };
+
+        setActiveConnection(fullConn);
       } catch (e) {
         console.error('Failed to load saved connection', e);
-      }
-    }
-
-    const savedLinks = localStorage.getItem('smart_links');
-    if (savedLinks) {
-      try {
-        setSmartLinks(JSON.parse(savedLinks));
-      } catch (e) {
-        console.error('Failed to load smart links', e);
       }
     }
   }, []);
@@ -167,22 +166,17 @@ function App() {
 
   const getConnectionString = (conn: DatabaseConnection) => {
     const user = encodeURIComponent(conn.username);
-    const password = (conn as any).password || '';
-    const pass = encodeURIComponent(password);
+    const password = encodeURIComponent(conn.password || '');
     const host = conn.host;
     const port = conn.port;
     const db = encodeURIComponent(conn.database);
 
-    console.log('[App] Building connection string:', {
-      hasPassword: !!password,
-      passwordLength: password.length,
-      user: conn.username,
-      host,
-      port,
-      database: conn.database
-    });
+    // Log for debugging (mask password)
+    const maskedStr = `postgresql://${user}:${conn.password ? '***' : ''}@${host}:${port}/${db}`;
+    console.log('[App] Connection string:', maskedStr);
 
-    return `postgresql://${user}:${pass}@${host}:${port}/${db}`;
+    // Build proper connection string
+    return `postgresql://${user}:${password}@${host}:${port}/${db}`;
   };
 
   const handleExecute = async () => {

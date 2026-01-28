@@ -48,10 +48,10 @@ export interface DatabaseConnection {
   port: number;
   database: string;
   username: string;
+  password?: string;
   isDefault: boolean;
   lastUsed: Date;
 }
-
 
 export interface SmartLink {
   targetTable: string;      // The child table (e.g., 'posts')
