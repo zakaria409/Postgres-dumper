@@ -19,6 +19,7 @@ function App() {
 
   const [step, setStep] = useState<Step>('input');
   const [parseResult, setParseResult] = useState<ParseResult | null>(null);
+  const [parsingMethod, setParsingMethod] = useState<'default' | 'alternative'>('default');
   const [mappings, setMappings] = useState<ColumnMapping[]>([]);
   const [sqlOutput, setSqlOutput] = useState('');
 
@@ -100,6 +101,7 @@ function App() {
   const handleReset = () => {
     setStep('input');
     setParseResult(null);
+    setParsingMethod('default');
     setMappings([]);
     setSqlOutput('');
     setExecutionResult(null);
@@ -386,67 +388,122 @@ function App() {
         )}
 
         {/* STEP 2: PREVIEW */}
-        {step === 'preview' && parseResult && (
-          <section className="animate-in zoom-in-95 duration-500">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-3">
-                <div className="w-1.5 h-6 bg-khaki-beige rounded-full" />
-                <h3 className="text-xl font-bold text-white tracking-wide">Mapping Preview</h3>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="px-3 py-1 bg-taupe/50 text-khaki-beige rounded-md text-xs font-bold border border-taupe">
-                  {parseResult.rows.length} ROWS
-                </span>
-                <span className="px-3 py-1 bg-taupe/50 text-khaki-beige rounded-md text-xs font-bold border border-taupe">
-                  {parseResult.headers.length} COLUMNS
-                </span>
-              </div>
-            </div>
+        {step === 'preview' && parseResult && (() => {
+          // Get active parse data based on selected method
+          const hasAlternative = parseResult.metadata.formatDetected === 'headings' &&
+            parseResult.metadata.alternativeParsing?.multiColumn;
 
-            <div className="bg-taupe/10 border border-taupe rounded-2xl overflow-hidden shadow-xl backdrop-blur-sm">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-gunmetal/80 border-b border-taupe">
-                      {parseResult.headers.map((header, i) => (
-                        <th key={i} className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-gray-500 whitespace-nowrap">
-                          {header}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-taupe/30">
-                    {parseResult.rows.slice(0, 5).map((row, i) => (
-                      <tr key={i} className="hover:bg-taupe/5 transition-colors group">
-                        {parseResult.headers.map((header, j) => (
-                          <td key={j} className="px-6 py-4 text-sm text-gray-300 whitespace-nowrap group-hover:text-white">
-                            {String(row[header] ?? '')}
-                          </td>
+          const activeHeaders = parsingMethod === 'alternative' && hasAlternative
+            ? parseResult.metadata.alternativeParsing!.multiColumn!.headers
+            : parseResult.headers;
+
+          const activeRows = parsingMethod === 'alternative' && hasAlternative
+            ? parseResult.metadata.alternativeParsing!.multiColumn!.rows
+            : parseResult.rows;
+
+          return (
+            <section className="animate-in zoom-in-95 duration-500">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-1.5 h-6 bg-khaki-beige rounded-full" />
+                  <h3 className="text-xl font-bold text-white tracking-wide">Mapping Preview</h3>
+                </div>
+                <div className="flex items-center gap-3">
+                  {hasAlternative && (
+                    <div className="flex items-center gap-2 px-3 py-1 bg-gunmetal border border-taupe rounded-lg">
+                      <button
+                        onClick={() => setParsingMethod('default')}
+                        className={cn(
+                          "px-3 py-1 rounded text-xs font-bold transition-all",
+                          parsingMethod === 'default'
+                            ? "bg-ember text-white shadow-lg"
+                            : "text-gray-400 hover:text-white"
+                        )}
+                      >
+                        Single Column
+                      </button>
+                      <button
+                        onClick={() => setParsingMethod('alternative')}
+                        className={cn(
+                          "px-3 py-1 rounded text-xs font-bold transition-all",
+                          parsingMethod === 'alternative'
+                            ? "bg-ember text-white shadow-lg"
+                            : "text-gray-400 hover:text-white"
+                        )}
+                      >
+                        Multi Column
+                      </button>
+                    </div>
+                  )}
+                  <span className="px-3 py-1 bg-taupe/50 text-khaki-beige rounded-md text-xs font-bold border border-taupe">
+                    {activeRows.length} ROWS
+                  </span>
+                  <span className="px-3 py-1 bg-taupe/50 text-khaki-beige rounded-md text-xs font-bold border border-taupe">
+                    {activeHeaders.length} COLUMNS
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-taupe/10 border border-taupe rounded-2xl overflow-hidden shadow-xl backdrop-blur-sm">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-gunmetal/80 border-b border-taupe">
+                        {activeHeaders.map((header, i) => (
+                          <th key={i} className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-gray-500 whitespace-nowrap">
+                            {header}
+                          </th>
                         ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-taupe/30">
+                      {activeRows.slice(0, 5).map((row, i) => (
+                        <tr key={i} className="hover:bg-taupe/5 transition-colors group">
+                          {activeHeaders.map((header, j) => (
+                            <td key={j} className="px-6 py-4 text-sm text-gray-300 whitespace-nowrap group-hover:text-white">
+                              {String(row[header] ?? '')}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
 
-            <div className="mt-8 flex justify-end gap-4">
-              <button
-                onClick={handleReset}
-                className="px-8 py-3 rounded-xl border border-taupe text-gray-400 hover:text-white hover:bg-taupe/20 font-bold transition-all"
-              >
-                Discard
-              </button>
-              <button
-                onClick={() => setStep('mapping')}
-                className="px-10 py-3 rounded-xl bg-ember hover:bg-ember-hover text-white font-bold shadow-lg shadow-ember/20 transition-all flex items-center gap-2 group"
-              >
-                Continue to Mapping
-                <span className="group-hover:translate-x-1 transition-transform">→</span>
-              </button>
-            </div>
-          </section>
-        )}
+              <div className="mt-8 flex justify-end gap-4">
+                <button
+                  onClick={handleReset}
+                  className="px-8 py-3 rounded-xl border border-taupe text-gray-400 hover:text-white hover:bg-taupe/20 font-bold transition-all"
+                >
+                  Discard
+                </button>
+                <button
+                  onClick={() => {
+                    // Update parseResult with selected method before proceeding
+                    if (parsingMethod === 'alternative' && hasAlternative) {
+                      setParseResult({
+                        ...parseResult,
+                        headers: parseResult.metadata.alternativeParsing!.multiColumn!.headers,
+                        rows: parseResult.metadata.alternativeParsing!.multiColumn!.rows,
+                        metadata: {
+                          ...parseResult.metadata,
+                          rowCount: parseResult.metadata.alternativeParsing!.multiColumn!.rowCount,
+                          columnCount: parseResult.metadata.alternativeParsing!.multiColumn!.columnCount
+                        }
+                      });
+                    }
+                    setStep('mapping');
+                  }}
+                  className="px-10 py-3 rounded-xl bg-ember hover:bg-ember-hover text-white font-bold shadow-lg shadow-ember/20 transition-all flex items-center gap-2 group"
+                >
+                  Continue to Mapping
+                  <span className="group-hover:translate-x-1 transition-transform">→</span>
+                </button>
+              </div>
+            </section>
+          );
+        })()}
 
         {/* STEP 3: MAPPING */}
         {step === 'mapping' && parseResult && (

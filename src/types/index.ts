@@ -20,12 +20,21 @@ export interface ValidationError {
 }
 
 export interface ParseError {
-  type: 'malformed_row' | 'column_mismatch' | 'empty_table' | 'invalid_separator' | 'format_error';
+  type: 'malformed_row' | 'column_mismatch' | 'empty_table' | 'invalid_separator' | 'format_error' | 'malformed_table';
   message: string;
   line?: number;
   column?: number;
   rawContent?: string;
   suggestion?: string;
+}
+
+export interface AlternativeParsing {
+  multiColumn?: {
+    headers: string[];
+    rows: any[];
+    columnCount: number;
+    rowCount: number;
+  };
 }
 
 export interface ParseResult {
@@ -36,8 +45,9 @@ export interface ParseResult {
     rowCount: number;
     columnCount: number;
     hasSeparatorRow: boolean;
-    formatDetected: 'pipe' | 'grid' | 'minimal' | 'json' | 'csv' | 'unknown';
+    formatDetected: 'pipe' | 'grid' | 'minimal' | 'headings' | 'json' | 'csv' | 'unknown';
     sampleValues: { [column: string]: any[] };
+    alternativeParsing?: AlternativeParsing;
   };
 }
 
